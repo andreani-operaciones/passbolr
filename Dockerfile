@@ -1,9 +1,10 @@
-FROM php:7-fpm
+FROM php:7.3.21-fpm
 
-LABEL maintainer="diego@passbolt.com"
+LABEL maintainer="Passbolt SA <contact@passbolt.com>"
 
-ARG PASSBOLT_VERSION="2.5.0"
+ARG PASSBOLT_VERSION="2.13.5"
 ARG PASSBOLT_URL="https://github.com/passbolt/passbolt_api/archive/v${PASSBOLT_VERSION}.tar.gz"
+ARG PASSBOLT_CURL_HEADERS=""
 
 ARG PHP_EXTENSIONS="gd \
       intl \
@@ -21,22 +22,24 @@ ARG PASSBOLT_DEV_PACKAGES="libgpgme11-dev \
       libicu-dev \
       libxslt1-dev \
       libmcrypt-dev \
-      unzip \
-      git"
+      unzip"
+
+ARG PASSBOLT_BASE_PACKAGES="nginx \
+         gnupg \
+         libgpgme11 \
+         libmcrypt4 \
+         mariadb-client \
+         supervisor \
+         cron"
 
 ENV PECL_BASE_URL="https://pecl.php.net/get"
 ENV PHP_EXT_DIR="/usr/src/php/ext"
 
 WORKDIR /var/www/passbolt
 RUN apt-get update \
-    && apt-get -y install --no-install-recommends $PASSBOLT_DEV_PACKAGES \
-         nginx \
-         gnupg \
-         libgpgme11 \
-         libmcrypt4 \
-         mariadb-client \
-         supervisor \
-         cron \
+    && apt-get -y install --no-install-recommends \
+      $PASSBOLT_DEV_PACKAGES \
+      $PASSBOLT_BASE_PACKAGES \
     && mkdir /home/www-data \
     && chown -R www-data:www-data /home/www-data \
     && usermod -d /home/www-data www-data \
@@ -59,7 +62,8 @@ RUN apt-get update \
        fi \
     && php composer-setup.php \
     && mv composer.phar /usr/local/bin/composer \
-    && curl -sSL $PASSBOLT_URL | tar zxf - -C . --strip-components 1 \
+    && rm composer-setup.php \
+    && curl -sSL -H "$PASSBOLT_CURL_HEADERS" "$PASSBOLT_URL" | tar zxf - -C . --strip-components 1 \
     && composer install -n --no-dev --optimize-autoloader \
     && chown -R www-data:www-data . \
     && chmod 775 $(find /var/www/passbolt/tmp -type d) \
@@ -71,11 +75,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && rm /usr/local/bin/composer \
     && echo 'php_flag[expose_php] = off' > /usr/local/etc/php-fpm.d/expose.conf \
-    && sed -i 's/# server_tokens/server_tokens/' /etc/nginx/nginx.conf
+    && sed -i 's/# server_tokens/server_tokens/' /etc/nginx/nginx.conf \
+    && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
 COPY conf/passbolt.conf /etc/nginx/conf.d/default.conf
 COPY conf/supervisor/*.conf /etc/supervisor/conf.d/
 COPY bin/docker-entrypoint.sh /docker-entrypoint.sh
+COPY scripts/wait-for.sh /usr/bin/wait-for.sh
 
 EXPOSE 80 443
 
